@@ -233,3 +233,38 @@ for c in data:
     exp_rx[c] = 10 * (loadings([10]) @ b)[0] - 9 * (loadings([9]) @ b)[0] - data[c][1].iloc[-1]
 pd.Series(exp_rx, name="exp_rx_1y").to_csv("results/expected_excess_return.csv")
 print("\nExpected 1y excess return, 10y zero, yields unchanged (%)\n", pd.Series(exp_rx).round(2))
+
+# ---------------- Part III figures ----------------
+COL = {"Switzerland": "#1f77b4", "France": "#ff7f0e"}   # same colours as fig2
+
+# fig4: how fast a shock dies out, phi^h, with half-lives
+hh = np.arange(0, 61)
+fig, ax = plt.subplots(1, 2, figsize=(10, 3.6), sharey=True)
+for a, k in zip(ax, ["level", "slope"]):
+    for c in COL:
+        r = pers[(pers.country == c) & (pers.factor == k)].iloc[0]
+        a.plot(hh, r.phi ** hh, c=COL[c], lw=2, label=f"{c} (half-life {r.half_life_m:.0f} m)")
+        a.axvline(r.half_life_m, c=COL[c], ls=":", lw=1)
+    a.axhline(0.5, c="grey", ls="--", lw=.8)
+    a.set_title(f"{k.capitalize()} shock"); a.set_xlabel("Months after shock"); a.legend(frameon=False)
+ax[0].set_ylabel("Share of shock remaining")
+plt.tight_layout(); plt.savefig("results/fig4_shock_decay.png", dpi=200); plt.close()
+
+# fig5: forecast RMSE relative to random walk (1 = as good as RW)
+fig, ax = plt.subplots(figsize=(6, 3.6)); w = 0.2; x = np.arange(3)
+for i, (c, mdl) in enumerate([(c, m) for c in COL for m in ["VAR", "AR"]]):
+    s = fc[fc.country == c].sort_values("h")
+    ax.bar(x + (i - 1.5) * w, s[f"{mdl}/RW"], w, color=COL[c], alpha=1 if mdl == "VAR" else .45,
+           label=f"{c} {mdl}")
+ax.axhline(1, c="k", lw=1); ax.set_ylim(0.9, 1.3)
+ax.set_xticks(x); ax.set_xticklabels(["h = 1", "h = 6", "h = 12"]); ax.set_ylabel("RMSE / RMSE random walk")
+ax.legend(frameon=False, ncol=2, fontsize=8)
+plt.tight_layout(); plt.savefig("results/fig5_forecast_vs_rw.png", dpi=200); plt.close()
+
+# fig6: cumulative 10y excess return (sum of monthly log returns, %)
+fig, ax = plt.subplots(figsize=(6, 3.6))
+for c in COL: ax.plot(xs[c].index, xs[c].cumsum(), c=COL[c], lw=2, label=c)
+ax.axhline(0, c="k", lw=.5); ax.set_ylabel("Cumulative excess return (%)"); ax.legend(frameon=False)
+plt.tight_layout(); plt.savefig("results/fig6_cum_excess_return.png", dpi=200); plt.close()
+
+print("\nFigures and tables saved in ./results/")
