@@ -226,3 +226,10 @@ print("\nLatest curve snapshot:")
 snap = pd.DataFrame({c: data[c].iloc[-1] for c in data}); snap.to_csv("results/latest_curve.csv")
 print(snap.round(3))
 print("\nFigures and tables saved in ./results/")
+# expected 1y excess return if yields stay put (RW best forecast): 10y zero, curve from NS
+exp_rx = {}
+for c in data:
+    b = factors[c].iloc[-1].values                                       # latest factors (Oct 2026)
+    exp_rx[c] = 10 * (loadings([10]) @ b)[0] - 9 * (loadings([9]) @ b)[0] - data[c][1].iloc[-1]
+pd.Series(exp_rx, name="exp_rx_1y").to_csv("results/expected_excess_return.csv")
+print("\nExpected 1y excess return, 10y zero, yields unchanged (%)\n", pd.Series(exp_rx).round(2))
