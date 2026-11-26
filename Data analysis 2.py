@@ -18,6 +18,22 @@ START, END = None, None              # e.g. "2005-01-01"; None = full common sam
 
 
 def load_swiss(path="Swiss Yield Data.xlsx"):
+    """Load the SNB spot-rate Excel export into a DataFrame.
+
+    Finds the header row ("Maturity"), extracts the maturity in years from each
+    column label (e.g. "1 year" -> 1), skips the series-code row, parses the
+    dates into the index and converts all yields to numeric (percent).
+
+    Parameters
+    ----------
+    path : str
+        Path to the SNB data portal Excel file.
+
+    Returns
+    -------
+    pd.DataFrame
+        Daily yields, indexed by date, with one column per maturity (in years).
+    """
     raw = pd.read_excel(path, header=None)
     hdr = raw.index[raw[0].astype(str).str.strip().eq("Maturity")][0]
     cols = raw.iloc[hdr, 1:].astype(str).str.extract(r"(\d+)")[0].astype(int).tolist()  # "1 year" -> 1
@@ -28,6 +44,23 @@ def load_swiss(path="Swiss Yield Data.xlsx"):
     return df.loc[:, ~df.columns.duplicated()]
 
 def load_france(pattern="Webstat_Export_en_FM.D.FR.EUR.FR2.BB.FRMOYTEC*.HSTA.xlsx"):
+    """Load the Banque de France Webstat TEC exports (one file per maturity).
+
+    Each file is matched by `pattern`; the maturity is read from the file name
+    ("TEC10" -> 10 years) and the observation values are combined into one table.
+    Missing observations (e.g. weekends) are dropped.
+
+    Parameters
+    ----------
+    pattern : str
+        Glob pattern matching the Webstat Excel exports.
+
+    Returns
+    -------
+    pd.DataFrame
+        Daily constant-maturity yields, indexed by date, one column per
+        maturity (in years), sorted by date.
+    """
     out = {}
     for f in glob.glob(pattern):
         m = int(re.search(r"TEC(\d+)\.", f).group(1))
@@ -38,6 +71,21 @@ def load_france(pattern="Webstat_Export_en_FM.D.FR.EUR.FR2.BB.FRMOYTEC*.HSTA.xls
     return pd.DataFrame(out).sort_index()
 
 def to_monthly(df):
+    """Resample a daily yield table to month-end observations.
+
+    Rows that are entirely missing are dropped first, then the last available
+    observation of each month is kept (frequency set by FREQ).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Daily yields with a DatetimeIndex.
+
+    Returns
+    -------
+    pd.DataFrame
+        Month-end yields, same columns as `df`.
+    """
     return df.dropna(how="all").resample(FREQ).last()
 
 ch = to_monthly(load_swiss())
@@ -62,7 +110,22 @@ ax.set_xlabel("Maturity (years)"); ax.set_ylabel("Mean yield (%)"); ax.legend()
 plt.tight_layout(); plt.savefig("results/fig2_avg_curve.png", dpi=200); plt.close()
 
 # stylized facts
-def acf(x, k): return x.autocorr(k)
+def acf(x, k):
+    """Return the lag-`k` sample autocorrelation of the series `x`.
+
+    Parameters
+    ----------
+    x : pd.Series
+        Time series (here a monthly yield).
+    k : int
+        Lag in periods (months).
+
+    Returns
+    -------
+    float
+        Autocorrelation of `x` at lag `k`.
+    """
+    return x.autocorr(k)
 rows = []
 for c, d in data.items():
     for m in MATS:
@@ -82,6 +145,22 @@ for c, d in data.items():
           "| concave =", bool(np.all(np.diff(mean.values) / np.diff(MATS) == np.sort(np.diff(mean.values) / np.diff(MATS))[::-1])))
 
 def shape(y):
+    """Classify the shape of a single yield curve.
+
+    Looks at the signs of the yield differences across maturities.
+
+    Parameters
+    ----------
+    y : pd.Series
+        Yields at one date, ordered by increasing maturity.
+
+    Returns
+    -------
+    str
+        "upward" (all differences positive), "inverted" (all negative),
+        "humped" (one sign change, up then down), "inv-humped" (one sign
+        change, down then up) or "S/other" (anything else).
+    """
     dy = np.diff(y.values)
     if np.all(dy > 0): return "upward"
     if np.all(dy < 0): return "inverted"
@@ -92,12 +171,46 @@ for c, d in data.items():
 
 # Nelson-Siegel (lambda fixed -> OLS per date)
 def loadings(tau, lam=LAMBDA):
+    """Build the Nelson-Siegel (Diebold-Li) factor loading matrix.
+
+    Columns are the level loading (1), the slope loading (1 - e^{-lam*tau}) /
+    (lam*tau) and the curvature loading (slope loading - e^{-lam*tau}).
+
+    Parameters
+    ----------
+    tau : array-like
+        Maturities in years.
+    lam : float
+        Decay parameter lambda (per year); defaults to LAMBDA.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (len(tau), 3).
+    """
     tau = np.asarray(tau, float); x = lam * tau
     l2 = (1 - np.exp(-x)) / x
     return np.column_stack([np.ones_like(tau), l2, l2 - np.exp(-x)])
 B = loadings(MATS)
 
 def fit_ns(d):
+    """Fit Nelson-Siegel factors to each date by cross-sectional OLS.
+
+    With lambda fixed, the model is linear in the factors, so each date is a
+    least-squares regression of the yields on the loading matrix B.
+
+    Parameters
+    ----------
+    d : pd.DataFrame
+        Yields (dates x maturities in MATS).
+
+    Returns
+    -------
+    fac : pd.DataFrame
+        Estimated factors ("level", "slope", "curv"), indexed by date.
+    fit : pd.DataFrame
+        Fitted yields, same shape as `d`.
+    """
     beta = np.linalg.lstsq(B, d.values.T, rcond=None)[0].T
     fac = pd.DataFrame(beta, index=d.index, columns=["level", "slope", "curv"])
     fit = pd.DataFrame(beta @ B.T, index=d.index, columns=d.columns)
@@ -157,7 +270,7 @@ ztest = []
 for k in ["level", "slope", "curv"]:
     ch_ = pers[(pers.country == "Switzerland") & (pers.factor == k)].iloc[0]
     fr_ = pers[(pers.country == "France") & (pers.factor == k)].iloc[0]
-    z = (fr_.phi - ch_.phi) / np.sqrt(fr_.se**2 + ch_.se**2)   # ignores cross-country cov 
+    z = (fr_.phi - ch_.phi) / np.sqrt(fr_.se**2 + ch_.se**2)   # ignores cross-country cov
     ztest.append({"factor": k, "phi_CH": ch_.phi, "phi_FR": fr_.phi, "z": z,
                   "p": 2 * (1 - stats.norm.cdf(abs(z)))})
 ztest = pd.DataFrame(ztest); ztest.to_csv("results/persistence_ztest.csv", index=False)
@@ -165,6 +278,28 @@ print("\nH0: equal persistence CH vs FR\n", ztest.round(3).to_string(index=False
 
 # Out of sample forecast: expanding window, h-month ahead, VAR(1) / AR(1) on factors vs random walk
 def oos(c, h=1, init=0.5):
+    """Run an expanding-window out-of-sample yield forecast for one country.
+
+    At each forecast origin the factors are forecast `h` months ahead with
+    (i) a VAR(1), (ii) separate AR(1) models per factor and (iii) a random walk
+    (last factors). Forecast factors are mapped to yields with the loading
+    matrix B and compared with the observed yields `h` months later.
+
+    Parameters
+    ----------
+    c : str
+        Country key in `factors` and `data` ("Switzerland" or "France").
+    h : int
+        Forecast horizon in months.
+    init : float
+        Share of the sample used as the initial estimation window.
+
+    Returns
+    -------
+    dict
+        Keys "VAR", "AR", "RW"; each holds an array of forecast errors
+        (n_forecasts x n_maturities), in percentage points.
+    """
     f, d = factors[c], data[c]; n = len(f); t0 = int(n * init); err = {"VAR": [], "AR": [], "RW": []}
     for t in range(t0, n - h):
         tr = f.iloc[:t + 1]
@@ -182,6 +317,27 @@ def oos(c, h=1, init=0.5):
 
 # Diebold-Mariano test : loss = squared error averaged over maturities
 def dm_test(e1, e2, h):
+    """Diebold-Mariano test of equal predictive accuracy (squared-error loss).
+
+    The loss at each forecast date is the squared error averaged over
+    maturities. The long-run variance of the loss differential uses Bartlett
+    weights with h-1 autocovariance lags, to allow for overlapping h-step
+    forecasts. A positive statistic means model 1 has the larger loss.
+
+    Parameters
+    ----------
+    e1, e2 : np.ndarray
+        Forecast errors of model 1 and model 2 (n_forecasts x n_maturities).
+    h : int
+        Forecast horizon in months.
+
+    Returns
+    -------
+    stat : float
+        DM statistic (asymptotically standard normal).
+    p : float
+        Two-sided p-value.
+    """
     d = (e1**2).mean(axis=1) - (e2**2).mean(axis=1)   # loss differential per forecast date
     T, dbar = len(d), d.mean()
     g = [np.sum((d[k:] - dbar) * (d[:T-k] - dbar)) / T for k in range(h)]   # autocov lag 0..h-1
@@ -204,6 +360,25 @@ print("\nOut-of-sample yield RMSE (pp), expanding window (second half of sample)
 
 # Risk/return for the advice: monthly excess return on a 10y zero, curve from NS
 def xs_returns(c, n=10):
+    """Compute monthly log excess returns on an n-year zero-coupon bond.
+
+    Yields come from the fitted Nelson-Siegel factors. The bond is bought at t
+    with maturity `n` and sold at t+1 with maturity n - 1/12, so the holding
+    return is n*y_t(n) - (n - 1/12)*y_{t+1}(n - 1/12). The 1-year yield divided
+    by 12 is subtracted as a funding-rate proxy. All values are in percent.
+
+    Parameters
+    ----------
+    c : str
+        Country key in `factors` and `data`.
+    n : float
+        Bond maturity in years.
+
+    Returns
+    -------
+    pd.Series
+        Monthly excess returns (%), indexed by the month in which they end.
+    """
     f = factors[c].values
     y_n  = f @ loadings([n]).ravel()                  # y_t(n)
     y_nm = f @ loadings([n - 1/12]).ravel()           # y_t(n - 1m), bond one month later
