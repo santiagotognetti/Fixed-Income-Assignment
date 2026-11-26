@@ -49,7 +49,7 @@ if END:   idx = idx[idx <= END]
 data = {"Switzerland": ch.loc[idx], "France": fr.loc[idx]}
 print("Common sample:", idx.min().date(), "to", idx.max().date(), "| obs:", len(idx))
 
-# ---------------- Part I: data figures + summary ----------------
+# data figures + summary
 fig, ax = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
 for a, (c, d) in zip(ax, data.items()):
     for m in [1, 5, 10, 20]: a.plot(d.index, d[m], label=f"{m}y")
@@ -61,7 +61,7 @@ for c, d in data.items(): ax.plot(MATS, d.mean(), marker="o", label=c)
 ax.set_xlabel("Maturity (years)"); ax.set_ylabel("Mean yield (%)"); ax.legend()
 plt.tight_layout(); plt.savefig("results/fig2_avg_curve.png", dpi=200); plt.close()
 
-# ---------------- Part II: stylized facts ----------------
+# stylized facts
 def acf(x, k): return x.autocorr(k)
 rows = []
 for c, d in data.items():
@@ -90,7 +90,7 @@ def shape(y):
 for c, d in data.items():
     print(f"\nSF (ii) shapes {c}:\n", d.apply(shape, axis=1).value_counts())
 
-# ---------------- Nelson-Siegel (lambda fixed -> OLS per date) ----------------
+# Nelson-Siegel (lambda fixed -> OLS per date)
 def loadings(tau, lam=LAMBDA):
     tau = np.asarray(tau, float); x = lam * tau
     l2 = (1 - np.exp(-x)) / x
@@ -123,7 +123,7 @@ for j, c in enumerate(data):
         ax[i, j].plot(factors[c].index, factors[c][f]); ax[i, j].set_title(f"{c}: {f}")
 plt.tight_layout(); plt.savefig("results/fig3_factors.png", dpi=200); plt.close()
 
-# ---------------- Part III: yield dynamics ----------------
+# yield dynamics
 summ = []
 for c, f in factors.items():
     for k in f.columns:
@@ -163,7 +163,7 @@ for k in ["level", "slope", "curv"]:
 ztest = pd.DataFrame(ztest); ztest.to_csv("results/persistence_ztest.csv", index=False)
 print("\nH0: equal persistence CH vs FR\n", ztest.round(3).to_string(index=False))
 
-# Out-of-sample forecast: expanding window, h-month ahead, VAR(1) / AR(1) on factors vs random walk
+# Out of sample forecast: expanding window, h-month ahead, VAR(1) / AR(1) on factors vs random walk
 def oos(c, h=1, init=0.5):
     f, d = factors[c], data[c]; n = len(f); t0 = int(n * init); err = {"VAR": [], "AR": [], "RW": []}
     for t in range(t0, n - h):
@@ -180,7 +180,7 @@ def oos(c, h=1, init=0.5):
             err[name].append(actual - B @ p)
     return {k: np.array(v) for k, v in err.items()}   # raw errors (n_forecasts x 7), RMSE computed below
 
-# Diebold-Mariano: loss = squared error averaged over maturities, HAC variance with h-1 lags
+# Diebold-Mariano test : loss = squared error averaged over maturities
 def dm_test(e1, e2, h):
     d = (e1**2).mean(axis=1) - (e2**2).mean(axis=1)   # loss differential per forecast date
     T, dbar = len(d), d.mean()
@@ -229,13 +229,13 @@ print("\nFigures and tables saved in ./results/")
 # expected 1y excess return if yields stay put (RW best forecast): 10y zero, curve from NS
 exp_rx = {}
 for c in data:
-    b = factors[c].iloc[-1].values                                       # latest factors (Oct 2026)
+    b = factors[c].iloc[-1].values
     exp_rx[c] = 10 * (loadings([10]) @ b)[0] - 9 * (loadings([9]) @ b)[0] - data[c][1].iloc[-1]
 pd.Series(exp_rx, name="exp_rx_1y").to_csv("results/expected_excess_return.csv")
 print("\nExpected 1y excess return, 10y zero, yields unchanged (%)\n", pd.Series(exp_rx).round(2))
 
-# ---------------- Part III figures ----------------
-COL = {"Switzerland": "#1f77b4", "France": "#ff7f0e"}   # same colours as fig2
+# figures
+COL = {"Switzerland": "#1f77b4", "France": "#ff7f0e"}
 
 # fig4: how fast a shock dies out, phi^h, with half-lives
 hh = np.arange(0, 61)

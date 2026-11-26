@@ -1,5 +1,5 @@
 
-"""QMiFI hand-in: Switzerland vs France, Nelson-Siegel analysis."""
+"""QMiFI hand-in: Switzerland and France, Nelson-Siegel analysis."""
 import glob, os, re, warnings
 import numpy as np, pandas as pd
 import matplotlib; matplotlib.use("Agg")
@@ -21,7 +21,7 @@ def load_swiss(path="Swiss Yield Data.xlsx"):
     raw = pd.read_excel(path, header=None)
     hdr = raw.index[raw[0].astype(str).str.strip().eq("Maturity")][0]
     cols = raw.iloc[hdr, 1:].astype(str).str.extract(r"(\d+)")[0].astype(int).tolist()  # "1 year" -> 1
-    df = raw.iloc[hdr + 2:].copy()                      # skip the series-code row
+    df = raw.iloc[hdr + 2:].copy()
     df.columns = ["date"] + cols
     df.index = pd.to_datetime(df.pop("date"), errors="coerce")
     df = df[df.index.notna()].apply(pd.to_numeric, errors="coerce")
@@ -49,7 +49,6 @@ if END:   idx = idx[idx <= END]
 data = {"Switzerland": ch.loc[idx], "France": fr.loc[idx]}
 print("Common sample:", idx.min().date(), "to", idx.max().date(), "| obs:", len(idx))
 
-# ---------------- Part I: data figures + summary ----------------
 fig, ax = plt.subplots(1, 2, figsize=(12, 4), sharey=True)
 for a, (c, d) in zip(ax, data.items()):
     for m in [1, 5, 10, 20]: a.plot(d.index, d[m], label=f"{m}y")
@@ -61,7 +60,6 @@ for c, d in data.items(): ax.plot(MATS, d.mean(), marker="o", label=c)
 ax.set_xlabel("Maturity (years)"); ax.set_ylabel("Mean yield (%)"); ax.legend()
 plt.tight_layout(); plt.savefig("results/fig2_avg_curve.png", dpi=200); plt.close()
 
-# ---------------- Part II: stylized facts ----------------
 def acf(x, k): return x.autocorr(k)
 rows = []
 for c, d in data.items():
@@ -90,7 +88,6 @@ def shape(y):
 for c, d in data.items():
     print(f"\nSF (ii) shapes {c}:\n", d.apply(shape, axis=1).value_counts())
 
-# ---------------- Nelson-Siegel (lambda fixed -> OLS per date) ----------------
 def loadings(tau, lam=LAMBDA):
     tau = np.asarray(tau, float); x = lam * tau
     l2 = (1 - np.exp(-x)) / x
@@ -123,7 +120,6 @@ for j, c in enumerate(data):
         ax[i, j].plot(factors[c].index, factors[c][f]); ax[i, j].set_title(f"{c}: {f}")
 plt.tight_layout(); plt.savefig("results/fig3_factors.png", dpi=200); plt.close()
 
-# ---------------- Part III: yield dynamics ----------------
 summ = []
 for c, f in factors.items():
     for k in f.columns:
@@ -143,7 +139,6 @@ for c, f in factors.items():
     print("t-values:\n", m.tvalues.round(2).iloc[1:].T.rename(columns=lambda x: x))
     print("Residual correlation:\n", pd.DataFrame(m.resid).corr().round(2))
 
-# Out-of-sample forecast: expanding window, h-month ahead, VAR(1) / AR(1) on factors vs random walk
 def oos(c, h=1, init=0.5):
     f, d = factors[c], data[c]; n = len(f); t0 = int(n * init); err = {"VAR": [], "AR": [], "RW": []}
     for t in range(t0, n - h):
